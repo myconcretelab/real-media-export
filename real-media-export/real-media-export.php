@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Real Media Export
  * Description: Fournit une page d'export des fichiers classés avec Real Media Library.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: OpenAI Assistant
  * Text Domain: real-media-export
  */
@@ -33,6 +33,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             add_action( 'admin_init', array( $this, 'maybe_cleanup_old_archives' ) );
             add_action( 'admin_post_real_media_export', array( $this, 'handle_export_request' ) );
             add_action( 'admin_post_real_media_export_download', array( $this, 'handle_download_request' ) );
+            add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
+            add_action( 'wp_ajax_real_media_export_generate', array( $this, 'handle_ajax_export_request' ) );
         }
 
         /**
@@ -52,6 +54,34 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 'upload_files',
                 'real-media-export',
                 array( $this, 'render_admin_page' )
+            );
+        }
+
+        /**
+         * Enqueue admin assets for the export screen.
+         *
+         * @param string $hook_suffix Current admin page hook suffix.
+         */
+        public function enqueue_assets( $hook_suffix ) {
+            if ( 'media_page_real-media-export' !== $hook_suffix ) {
+                return;
+            }
+
+            $asset_url = plugin_dir_url( __FILE__ );
+
+            wp_enqueue_style(
+                'real-media-export-admin',
+                $asset_url . 'assets/css/admin.css',
+                array(),
+                '1.1.0'
+            );
+
+            wp_enqueue_script(
+                'real-media-export-admin',
+                $asset_url . 'assets/js/admin.js',
+                array(),
+                '1.1.0',
+                true
             );
         }
 
@@ -108,6 +138,13 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
             $result = $this->maybe_get_result();
 
+            $script_settings = $this->prepare_script_settings( $result );
+            wp_add_inline_script(
+                'real-media-export-admin',
+                'window.realMediaExportSettings = ' . wp_json_encode( $script_settings ) . ';',
+                'before'
+            );
+
             echo '<div class="wrap real-media-export">';
             echo '<h1>' . esc_html__( 'Export des fichiers Real Media Library', 'real-media-export' ) . '</h1>';
 
@@ -118,15 +155,10 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 );
             }
 
-            if ( isset( $result['message'] ) ) {
-                printf( '<div class="notice notice-%1$s"><p>%2$s</p></div>', esc_attr( $result['status'] ), wp_kses_post( $result['message'] ) );
-            }
+            echo '<div class="real-media-export-panels">';
 
-            if ( ! empty( $result['archives'] ) ) {
-                $this->render_results_table( $result['archives'], $result );
-            }
-
-            echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
+            echo '<section class="real-media-export-panel real-media-export-panel--form">';
+            echo '<form id="real-media-export-form" class="real-media-export-form" method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
             wp_nonce_field( self::NONCE_ACTION );
             echo '<input type="hidden" name="action" value="real_media_export" />';
 
@@ -198,7 +230,214 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             submit_button( __( 'Générer l’archive', 'real-media-export' ) );
 
             echo '</form>';
+            echo '</section>';
+
+            echo '<section class="real-media-export-panel real-media-export-panel--activity">';
+            $this->render_activity_panel( $result );
+            echo '</section>';
+
             echo '</div>';
+            echo '</div>';
+        }
+
+        /**
+         * Prepare settings passed to the JavaScript controller.
+         *
+         * @param array $result Result data.
+         *
+         * @return array
+         */
+        protected function prepare_script_settings( $result ) {
+            $settings = array(
+                'ajaxUrl' => admin_url( 'admin-ajax.php' ),
+                'i18n'    => array(
+                    'preparing'           => esc_html__( 'Préparation de la génération…', 'real-media-export' ),
+                    'processing'          => esc_html__( 'Analyse des fichiers et création des archives…', 'real-media-export' ),
+                    'success'             => esc_html__( 'Les archives sont prêtes.', 'real-media-export' ),
+                    'warning'             => esc_html__( 'Les archives sont prêtes avec des avertissements.', 'real-media-export' ),
+                    'error'               => esc_html__( 'Une erreur est survenue pendant la génération.', 'real-media-export' ),
+                    'ready'               => esc_html__( 'Liens de téléchargement disponibles.', 'real-media-export' ),
+                    'activityPlaceholder' => esc_html__( 'Le suivi en direct de la génération apparaîtra ici.', 'real-media-export' ),
+                    'resultsPlaceholder'  => esc_html__( 'Les liens de téléchargement apparaîtront ici une fois les archives prêtes.', 'real-media-export' ),
+                    'downloadLabel'       => esc_html__( 'Télécharger', 'real-media-export' ),
+                    'generatedOn'         => esc_html__( 'Généré le %s', 'real-media-export' ),
+                    'filesExportedSummary' => esc_html__( '%1$s fichier(s) exporté(s) sur %2$s', 'real-media-export' ),
+                    'archivesCountSummary' => esc_html__( '%s archive(s)', 'real-media-export' ),
+                    'filesSkippedSummary'  => esc_html__( '%s fichier(s) ignoré(s)', 'real-media-export' ),
+                    'primaryFoldersLabel'  => esc_html__( 'Dossiers principaux', 'real-media-export' ),
+                    'previewFilesLabel'    => esc_html__( 'Exemples de fichiers', 'real-media-export' ),
+                    'maxSizeReachedNote'   => esc_html__( 'Cet archive a été clôturée automatiquement car la taille maximale définie a été atteinte.', 'real-media-export' ),
+                    'downloadUnavailable'  => esc_html__( 'Lien de téléchargement indisponible.', 'real-media-export' ),
+                    'archiveTitleFallback' => esc_html__( 'Archive ZIP', 'real-media-export' ),
+                    'loading'              => esc_html__( 'Création des archives…', 'real-media-export' ),
+                    'compressedSizeLabel'  => esc_html__( 'Taille compressée', 'real-media-export' ),
+                    'originalsSizeLabel'   => esc_html__( 'Taille cumulée des originaux', 'real-media-export' ),
+                    'filesCountLabel'      => esc_html__( 'Nombre de fichiers', 'real-media-export' ),
+                ),
+            );
+
+            $initial_result = $this->prepare_result_for_js( $result );
+            if ( null !== $initial_result ) {
+                $settings['initialResult'] = $initial_result;
+            }
+
+            return $settings;
+        }
+
+        /**
+         * Render the activity panel containing the live log and generated archives.
+         *
+         * @param array $result Result data.
+         */
+        protected function render_activity_panel( $result ) {
+            $status  = isset( $result['status'] ) ? $result['status'] : '';
+            $message = isset( $result['message'] ) ? $result['message'] : '';
+
+            $notice_class = 'notice notice-info';
+            if ( 'success' === $status ) {
+                $notice_class = 'notice notice-success';
+            } elseif ( 'warning' === $status ) {
+                $notice_class = 'notice notice-warning';
+            } elseif ( 'error' === $status ) {
+                $notice_class = 'notice notice-error';
+            }
+
+            echo '<div class="real-media-export-activity">';
+            echo '<h2>' . esc_html__( 'Journal d’activité', 'real-media-export' ) . '</h2>';
+            echo '<div id="real-media-export-log" class="real-media-export-log" role="log" aria-live="polite" aria-relevant="additions text">';
+            echo '<p class="real-media-export-log__placeholder">' . esc_html__( 'Le suivi en direct de la génération apparaîtra ici.', 'real-media-export' ) . '</p>';
+            echo '</div>';
+
+            echo '<div id="real-media-export-message" class="real-media-export-message" data-status="' . esc_attr( $status ) . '">';
+            if ( ! empty( $message ) ) {
+                echo '<div class="' . esc_attr( $notice_class ) . '"><div class="real-media-export-message__content">' . wp_kses_post( $message ) . '</div></div>';
+            }
+            echo '</div>';
+
+            $this->render_results_cards( $result );
+            echo '</div>';
+        }
+
+        /**
+         * Render the download cards for generated archives.
+         *
+         * @param array $result Result data.
+         */
+        protected function render_results_cards( $result ) {
+            $archives = isset( $result['archives'] ) ? (array) $result['archives'] : array();
+
+            echo '<div id="real-media-export-results" class="real-media-export-results" aria-live="polite">';
+
+            if ( ! empty( $result['generated_at_formatted'] ) || ! empty( $result['summary'] ) ) {
+                echo '<div class="real-media-export-results__header">';
+                if ( ! empty( $result['generated_at_formatted'] ) ) {
+                    echo '<span class="real-media-export-results__timestamp">' . esc_html( sprintf( esc_html__( 'Généré le %s', 'real-media-export' ), $result['generated_at_formatted'] ) ) . '</span>';
+                }
+
+                if ( ! empty( $result['summary'] ) && is_array( $result['summary'] ) ) {
+                    $summary_parts = array();
+                    if ( isset( $result['summary']['files_exported'] ) && isset( $result['summary']['files_total'] ) ) {
+                        $summary_parts[] = sprintf(
+                            /* translators: 1: number of exported files, 2: total files. */
+                            esc_html__( '%1$s fichier(s) exporté(s) sur %2$s', 'real-media-export' ),
+                            number_format_i18n( (int) $result['summary']['files_exported'] ),
+                            number_format_i18n( (int) $result['summary']['files_total'] )
+                        );
+                    }
+
+                    if ( ! empty( $archives ) ) {
+                        $summary_parts[] = sprintf(
+                            /* translators: %s: number of archives. */
+                            esc_html__( '%s archive(s)', 'real-media-export' ),
+                            number_format_i18n( count( $archives ) )
+                        );
+                    }
+
+                    if ( ! empty( $result['summary']['files_skipped'] ) ) {
+                        $summary_parts[] = sprintf(
+                            /* translators: %s: number of skipped files. */
+                            esc_html__( '%s fichier(s) ignoré(s)', 'real-media-export' ),
+                            number_format_i18n( (int) $result['summary']['files_skipped'] )
+                        );
+                    }
+
+                    if ( ! empty( $summary_parts ) ) {
+                        echo '<span class="real-media-export-results__summary">' . esc_html( implode( ' · ', $summary_parts ) ) . '</span>';
+                    }
+                }
+                echo '</div>';
+            }
+
+            if ( empty( $archives ) ) {
+                echo '<p class="real-media-export-results__placeholder">' . esc_html__( 'Les liens de téléchargement apparaîtront ici une fois les archives prêtes.', 'real-media-export' ) . '</p>';
+                echo '</div>';
+                return;
+            }
+
+            echo '<div class="real-media-export-results__grid">';
+            foreach ( $archives as $index => $archive ) {
+                $this->render_archive_card( $archive, (int) $index );
+            }
+            echo '</div>';
+            echo '</div>';
+        }
+
+        /**
+         * Render a single archive card.
+         *
+         * @param array $archive Archive data.
+         * @param int   $index   Index within the list.
+         */
+        protected function render_archive_card( $archive, $index ) {
+            $file_name      = isset( $archive['file'] ) ? $archive['file'] : '';
+            $size_human     = isset( $archive['size_human'] ) ? $archive['size_human'] : ( isset( $archive['size'] ) ? size_format( (int) $archive['size'] ) : '' );
+            $download_url   = isset( $archive['download_url'] ) ? $archive['download_url'] : $this->get_download_url( $file_name );
+            $file_count     = isset( $archive['file_count'] ) ? (int) $archive['file_count'] : 0;
+            $created_at     = isset( $archive['created_at_formatted'] ) ? $archive['created_at_formatted'] : '';
+            $bytes_total    = isset( $archive['bytes_total_human'] ) ? $archive['bytes_total_human'] : '';
+            $folders        = isset( $archive['folders'] ) ? array_values( array_filter( (array) $archive['folders'] ) ) : array();
+            $files_preview  = isset( $archive['files_preview'] ) ? array_values( array_filter( (array) $archive['files_preview'] ) ) : array();
+            $max_size_reach = ! empty( $archive['max_size_reached'] );
+
+            echo '<article class="real-media-export-card" style="--real-media-export-card-index:' . esc_attr( $index ) . '">';
+            echo '<header class="real-media-export-card__header">';
+            echo '<h3 class="real-media-export-card__title">' . esc_html( $file_name ) . '</h3>';
+            if ( ! empty( $created_at ) ) {
+                echo '<p class="real-media-export-card__subtitle">' . esc_html( sprintf( esc_html__( 'Créé le %s', 'real-media-export' ), $created_at ) ) . '</p>';
+            }
+            echo '</header>';
+
+            echo '<ul class="real-media-export-card__meta">';
+            if ( '' !== $size_human ) {
+                echo '<li><span class="real-media-export-card__meta-label">' . esc_html__( 'Taille compressée', 'real-media-export' ) . '</span><span class="real-media-export-card__meta-value">' . esc_html( $size_human ) . '</span></li>';
+            }
+            if ( '' !== $bytes_total ) {
+                echo '<li><span class="real-media-export-card__meta-label">' . esc_html__( 'Taille cumulée des originaux', 'real-media-export' ) . '</span><span class="real-media-export-card__meta-value">' . esc_html( $bytes_total ) . '</span></li>';
+            }
+            if ( $file_count > 0 ) {
+                echo '<li><span class="real-media-export-card__meta-label">' . esc_html__( 'Nombre de fichiers', 'real-media-export' ) . '</span><span class="real-media-export-card__meta-value">' . esc_html( number_format_i18n( $file_count ) ) . '</span></li>';
+            }
+            echo '</ul>';
+
+            if ( ! empty( $folders ) ) {
+                echo '<p class="real-media-export-card__detail"><span class="real-media-export-card__detail-label">' . esc_html__( 'Dossiers principaux', 'real-media-export' ) . '</span><span class="real-media-export-card__detail-value">' . esc_html( implode( ', ', $folders ) ) . '</span></p>';
+            }
+
+            if ( ! empty( $files_preview ) ) {
+                echo '<p class="real-media-export-card__detail"><span class="real-media-export-card__detail-label">' . esc_html__( 'Exemples de fichiers', 'real-media-export' ) . '</span><span class="real-media-export-card__detail-value">' . esc_html( implode( ', ', $files_preview ) ) . '</span></p>';
+            }
+
+            if ( $max_size_reach ) {
+                echo '<p class="real-media-export-card__note">' . esc_html__( 'Cet archive a été clôturée automatiquement car la taille maximale définie a été atteinte.', 'real-media-export' ) . '</p>';
+            }
+
+            if ( $download_url ) {
+                echo '<div class="real-media-export-card__actions"><a class="button button-primary" href="' . esc_url( $download_url ) . '">' . esc_html__( 'Télécharger ce ZIP', 'real-media-export' ) . '</a></div>';
+            } else {
+                echo '<p class="real-media-export-card__note">' . esc_html__( 'Lien de téléchargement indisponible.', 'real-media-export' ) . '</p>';
+            }
+
+            echo '</article>';
         }
 
         /**
@@ -288,11 +527,82 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
             check_admin_referer( self::NONCE_ACTION );
 
-            $folder_id         = isset( $_POST['folder_id'] ) ? absint( $_POST['folder_id'] ) : 0;
-            $include_children  = ! empty( $_POST['include_children'] );
-            $max_size_mb       = isset( $_POST['max_size_mb'] ) ? floatval( $_POST['max_size_mb'] ) : 0;
-            $archive_prefix    = isset( $_POST['archive_prefix'] ) ? sanitize_text_field( wp_unslash( $_POST['archive_prefix'] ) ) : '';
-            $preserve_structure = ! empty( $_POST['preserve_structure'] );
+            $params = array(
+                'folder_id'          => isset( $_POST['folder_id'] ) ? absint( $_POST['folder_id'] ) : 0,
+                'include_children'   => ! empty( $_POST['include_children'] ),
+                'max_size_mb'        => isset( $_POST['max_size_mb'] ) ? floatval( $_POST['max_size_mb'] ) : 0,
+                'archive_prefix'     => isset( $_POST['archive_prefix'] ) ? sanitize_text_field( wp_unslash( $_POST['archive_prefix'] ) ) : '',
+                'preserve_structure' => ! empty( $_POST['preserve_structure'] ),
+            );
+
+            $result = $this->process_export( $params );
+
+            $this->store_result( $result );
+            $this->redirect_after_action();
+        }
+
+        /**
+         * Handle AJAX export requests.
+         */
+        public function handle_ajax_export_request() {
+            if ( ! current_user_can( 'upload_files' ) ) {
+                wp_send_json_error(
+                    array(
+                        'status'       => 'error',
+                        'message_html' => esc_html__( 'Action non autorisée.', 'real-media-export' ),
+                        'message_text' => esc_html__( 'Action non autorisée.', 'real-media-export' ),
+                        'archives'     => array(),
+                    ),
+                    403
+                );
+            }
+
+            check_ajax_referer( self::NONCE_ACTION );
+
+            $params = array(
+                'folder_id'          => isset( $_POST['folder_id'] ) ? absint( $_POST['folder_id'] ) : 0,
+                'include_children'   => ! empty( $_POST['include_children'] ),
+                'max_size_mb'        => isset( $_POST['max_size_mb'] ) ? floatval( $_POST['max_size_mb'] ) : 0,
+                'archive_prefix'     => isset( $_POST['archive_prefix'] ) ? sanitize_text_field( wp_unslash( $_POST['archive_prefix'] ) ) : '',
+                'preserve_structure' => ! empty( $_POST['preserve_structure'] ),
+            );
+
+            $result  = $this->process_export( $params );
+            $payload = $this->prepare_result_for_js( $result );
+
+            if ( null === $payload ) {
+                $payload = array(
+                    'status'       => 'error',
+                    'message_html' => esc_html__( 'Une erreur inattendue est survenue.', 'real-media-export' ),
+                    'message_text' => esc_html__( 'Une erreur inattendue est survenue.', 'real-media-export' ),
+                    'archives'     => array(),
+                );
+            }
+
+            if ( isset( $result['status'] ) && 'error' === $result['status'] ) {
+                wp_send_json_error( $payload );
+            }
+
+            wp_send_json_success( $payload );
+        }
+
+        /**
+         * Process an export request and return the result payload.
+         *
+         * @param array $params Export parameters.
+         *
+         * @return array
+         */
+        protected function process_export( $params ) {
+            $defaults = array(
+                'folder_id'          => 0,
+                'include_children'   => true,
+                'max_size_mb'        => 0,
+                'archive_prefix'     => '',
+                'preserve_structure' => true,
+            );
+
+            $params = wp_parse_args( $params, $defaults );
 
             $result = array(
                 'status'   => 'error',
@@ -303,31 +613,31 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $taxonomy = $this->get_folder_taxonomy();
             if ( empty( $taxonomy ) || ! taxonomy_exists( $taxonomy ) ) {
                 $result['message'] = esc_html__( 'Impossible de détecter la taxonomie utilisée par Real Media Library.', 'real-media-export' );
-                $this->store_result( $result );
-                $this->redirect_after_action();
+
+                return $result;
             }
 
-            if ( $folder_id <= 0 ) {
+            if ( $params['folder_id'] <= 0 ) {
                 $result['message'] = esc_html__( 'Veuillez sélectionner un dossier à exporter.', 'real-media-export' );
-                $this->store_result( $result );
-                $this->redirect_after_action();
+
+                return $result;
             }
 
-            $folder = get_term( $folder_id, $taxonomy );
+            $folder = get_term( $params['folder_id'], $taxonomy );
             if ( ! $folder || is_wp_error( $folder ) ) {
                 $result['message'] = esc_html__( 'Le dossier demandé est introuvable.', 'real-media-export' );
-                $this->store_result( $result );
-                $this->redirect_after_action();
+
+                return $result;
             }
 
-            $term_ids = array( $folder_id );
-            if ( $include_children ) {
+            $term_ids = array( (int) $params['folder_id'] );
+            if ( $params['include_children'] ) {
                 $descendants = get_terms(
                     array(
                         'taxonomy'   => $taxonomy,
                         'hide_empty' => false,
                         'fields'     => 'ids',
-                        'child_of'   => $folder_id,
+                        'child_of'   => (int) $params['folder_id'],
                     )
                 );
                 if ( ! is_wp_error( $descendants ) && ! empty( $descendants ) ) {
@@ -335,36 +645,181 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 }
             }
 
-            $attachments = $this->query_attachments( $term_ids, $taxonomy, $include_children );
+            $attachments = $this->query_attachments( $term_ids, $taxonomy, (bool) $params['include_children'] );
 
             if ( empty( $attachments ) ) {
                 $result['status']  = 'warning';
                 $result['message'] = esc_html__( 'Aucun fichier n’a été trouvé pour les paramètres choisis.', 'real-media-export' );
-                $this->store_result( $result );
-                $this->redirect_after_action();
+
+                return $result;
             }
 
             $archives = $this->create_archives(
                 $attachments,
                 array(
-                    'folder_id'          => $folder_id,
+                    'folder_id'          => (int) $params['folder_id'],
                     'term_ids'           => $term_ids,
                     'taxonomy'           => $taxonomy,
-                    'max_size_mb'        => $max_size_mb,
-                    'archive_prefix'     => $archive_prefix,
-                    'preserve_structure' => $preserve_structure,
+                    'max_size_mb'        => $params['max_size_mb'],
+                    'archive_prefix'     => $params['archive_prefix'],
+                    'preserve_structure' => $params['preserve_structure'],
                 )
             );
 
             if ( empty( $archives['archives'] ) ) {
-                $this->store_result( $archives );
-                $this->redirect_after_action();
+                return $archives;
             }
 
-            update_user_meta( get_current_user_id(), 'real_media_export_last_folder', $folder_id );
+            $archives['archives']            = $this->prepare_archives_for_client( $archives['archives'] );
+            $archives['generated_at']         = current_time( 'timestamp' );
+            $archives['generated_at_formatted'] = wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $archives['generated_at'] );
+            $archives['summary']              = array(
+                'files_total'    => isset( $archives['files_total'] ) ? (int) $archives['files_total'] : count( $attachments ),
+                'files_exported' => isset( $archives['files_exported'] ) ? (int) $archives['files_exported'] : count( $attachments ),
+                'files_skipped'  => isset( $archives['files_skipped'] ) ? count( (array) $archives['files_skipped'] ) : 0,
+                'archives_count' => count( $archives['archives'] ),
+            );
 
-            $this->store_result( $archives );
-            $this->redirect_after_action();
+            if ( isset( $archives['files_skipped'] ) && is_array( $archives['files_skipped'] ) ) {
+                $archives['files_skipped'] = array_map( 'wp_strip_all_tags', $archives['files_skipped'] );
+            }
+
+            update_user_meta( get_current_user_id(), 'real_media_export_last_folder', (int) $params['folder_id'] );
+
+            return $archives;
+        }
+
+        /**
+         * Prepare archive details for display or API usage.
+         *
+         * @param array $archives Archives list.
+         *
+         * @return array
+         */
+        protected function prepare_archives_for_client( $archives ) {
+            $prepared = array();
+
+            foreach ( (array) $archives as $archive ) {
+                $file_name   = isset( $archive['file'] ) ? wp_strip_all_tags( $archive['file'] ) : '';
+                $size        = isset( $archive['size'] ) ? (int) $archive['size'] : 0;
+                $bytes_total = isset( $archive['bytes_total'] ) ? (int) $archive['bytes_total'] : 0;
+                $created_at  = isset( $archive['created_at'] ) ? (int) $archive['created_at'] : 0;
+
+                if ( ! $created_at && ! empty( $archive['path'] ) && file_exists( $archive['path'] ) ) {
+                    $created_at = (int) filemtime( $archive['path'] );
+                }
+
+                $folders = array();
+                if ( isset( $archive['folders'] ) ) {
+                    foreach ( (array) $archive['folders'] as $folder ) {
+                        $folder = wp_strip_all_tags( $folder );
+                        if ( '' !== $folder ) {
+                            $folders[] = $folder;
+                        }
+                    }
+                }
+                $folders = array_values( array_unique( $folders ) );
+
+                $files_preview = array();
+                if ( isset( $archive['files_preview'] ) ) {
+                    foreach ( (array) $archive['files_preview'] as $preview ) {
+                        $preview = wp_strip_all_tags( $preview );
+                        if ( '' !== $preview ) {
+                            $files_preview[] = $preview;
+                        }
+                    }
+                }
+
+                $download_url = $this->get_download_url( $file_name );
+
+                $prepared[] = array(
+                    'file'                 => $file_name,
+                    'size'                 => $size,
+                    'size_human'           => $size > 0 ? size_format( $size ) : '',
+                    'bytes_total'          => $bytes_total,
+                    'bytes_total_human'    => $bytes_total > 0 ? size_format( $bytes_total ) : '',
+                    'created_at'           => $created_at,
+                    'created_at_formatted' => $created_at ? wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $created_at ) : '',
+                    'file_count'           => isset( $archive['file_count'] ) ? (int) $archive['file_count'] : 0,
+                    'files_preview'        => $files_preview,
+                    'folders'              => $folders,
+                    'max_size_reached'     => ! empty( $archive['max_size_reached'] ),
+                    'download_url'         => $download_url ? esc_url_raw( $download_url ) : '',
+                );
+            }
+
+            return $prepared;
+        }
+
+        /**
+         * Prepare a result payload to be consumed by JavaScript.
+         *
+         * @param array $result Result data.
+         *
+         * @return array|null
+         */
+        protected function prepare_result_for_js( $result ) {
+            if ( empty( $result ) || ! is_array( $result ) ) {
+                return null;
+            }
+
+            $status  = isset( $result['status'] ) ? $result['status'] : '';
+            $message = isset( $result['message'] ) ? $result['message'] : '';
+
+            $archives = isset( $result['archives'] ) ? (array) $result['archives'] : array();
+            if ( ! empty( $archives ) && ( ! isset( $archives[0]['size_human'] ) || ! array_key_exists( 'download_url', $archives[0] ) ) ) {
+                $archives = $this->prepare_archives_for_client( $archives );
+            }
+
+            $archives_data = array();
+            foreach ( $archives as $archive ) {
+                $archives_data[] = array(
+                    'file'                 => isset( $archive['file'] ) ? $archive['file'] : '',
+                    'size'                 => isset( $archive['size'] ) ? (int) $archive['size'] : 0,
+                    'size_human'           => isset( $archive['size_human'] ) ? $archive['size_human'] : ( isset( $archive['size'] ) ? size_format( (int) $archive['size'] ) : '' ),
+                    'bytes_total'          => isset( $archive['bytes_total'] ) ? (int) $archive['bytes_total'] : 0,
+                    'bytes_total_human'    => isset( $archive['bytes_total_human'] ) ? $archive['bytes_total_human'] : '',
+                    'created_at'           => isset( $archive['created_at'] ) ? (int) $archive['created_at'] : 0,
+                    'created_at_formatted' => isset( $archive['created_at_formatted'] ) ? $archive['created_at_formatted'] : '',
+                    'file_count'           => isset( $archive['file_count'] ) ? (int) $archive['file_count'] : 0,
+                    'files_preview'        => isset( $archive['files_preview'] ) ? array_values( (array) $archive['files_preview'] ) : array(),
+                    'folders'              => isset( $archive['folders'] ) ? array_values( (array) $archive['folders'] ) : array(),
+                    'max_size_reached'     => ! empty( $archive['max_size_reached'] ),
+                    'download_url'         => isset( $archive['download_url'] ) ? $archive['download_url'] : $this->get_download_url( isset( $archive['file'] ) ? $archive['file'] : '' ),
+                );
+            }
+
+            $summary = array(
+                'files_total'    => 0,
+                'files_exported' => 0,
+                'files_skipped'  => 0,
+                'archives_count' => count( $archives_data ),
+            );
+
+            if ( isset( $result['summary'] ) && is_array( $result['summary'] ) ) {
+                $summary['files_total']    = isset( $result['summary']['files_total'] ) ? (int) $result['summary']['files_total'] : $summary['files_total'];
+                $summary['files_exported'] = isset( $result['summary']['files_exported'] ) ? (int) $result['summary']['files_exported'] : $summary['files_exported'];
+                $summary['files_skipped']  = isset( $result['summary']['files_skipped'] ) ? (int) $result['summary']['files_skipped'] : $summary['files_skipped'];
+                $summary['archives_count'] = isset( $result['summary']['archives_count'] ) ? (int) $result['summary']['archives_count'] : $summary['archives_count'];
+            } else {
+                $summary['files_total']    = isset( $result['files_total'] ) ? (int) $result['files_total'] : $summary['files_total'];
+                $summary['files_exported'] = isset( $result['files_exported'] ) ? (int) $result['files_exported'] : $summary['files_exported'];
+                $summary['files_skipped']  = isset( $result['files_skipped'] ) ? count( (array) $result['files_skipped'] ) : $summary['files_skipped'];
+            }
+
+            $generated_at         = isset( $result['generated_at'] ) ? (int) $result['generated_at'] : 0;
+            $generated_at_display = isset( $result['generated_at_formatted'] ) ? $result['generated_at_formatted'] : ( $generated_at ? wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $generated_at ) : '' );
+
+            return array(
+                'status'                 => $status,
+                'message_html'           => $message ? wp_kses_post( $message ) : '',
+                'message_text'           => $message ? wp_strip_all_tags( $message ) : '',
+                'archives'               => $archives_data,
+                'generated_at'           => $generated_at,
+                'generated_at_formatted' => $generated_at_display,
+                'summary'                => $summary,
+                'files_skipped'          => isset( $result['files_skipped'] ) ? array_values( array_map( 'wp_strip_all_tags', (array) $result['files_skipped'] ) ) : array(),
+            );
         }
 
         /**
@@ -482,6 +937,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $files_in_zip   = 0;
             $files_total    = 0;
             $files_skipped  = array();
+            $current_archive_meta = array();
             $timestamp      = gmdate( 'Ymd-His' );
             $prefix         = $options['archive_prefix'] ? sanitize_title( $options['archive_prefix'] ) : sanitize_title( get_bloginfo( 'name' ) );
             if ( empty( $prefix ) ) {
@@ -489,28 +945,66 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             }
             $base_filename = $prefix . '-' . $timestamp;
 
-            $close_archive = function() use ( &$current_zip, &$archives, &$archive_index, &$files_in_zip, &$current_size, $export_dir ) {
+            $close_archive = function() use ( &$current_zip, &$archives, &$archive_index, &$files_in_zip, &$current_size, $export_dir, &$current_archive_meta ) {
                 if ( $current_zip instanceof ZipArchive ) {
                     $current_zip->close();
-                    if ( ! empty( $current_zip->filename ) && file_exists( $current_zip->filename ) && $files_in_zip > 0 ) {
-                        $archives[] = array(
-                            'file' => basename( $current_zip->filename ),
-                            'size' => filesize( $current_zip->filename ),
-                            'path' => $current_zip->filename,
-                        );
+
+                    if ( $files_in_zip > 0 ) {
+                        $full_path = '';
+                        if ( ! empty( $current_archive_meta['path'] ) ) {
+                            $full_path = $current_archive_meta['path'];
+                        } elseif ( ! empty( $current_zip->filename ) ) {
+                            $full_path = $current_zip->filename;
+                        }
+
+                        if ( $full_path && file_exists( $full_path ) ) {
+                            $current_archive_meta['path'] = $full_path;
+                            $current_archive_meta['file'] = basename( $full_path );
+                            $current_archive_meta['size'] = filesize( $full_path );
+                            if ( empty( $current_archive_meta['created_at'] ) ) {
+                                $current_archive_meta['created_at'] = filemtime( $full_path );
+                            }
+                        }
+
+                        if ( empty( $current_archive_meta['folders'] ) ) {
+                            $current_archive_meta['folders'] = array();
+                        } else {
+                            $current_archive_meta['folders'] = array_values( array_unique( array_filter( $current_archive_meta['folders'] ) ) );
+                        }
+
+                        if ( empty( $current_archive_meta['files_preview'] ) ) {
+                            $current_archive_meta['files_preview'] = array();
+                        } else {
+                            $current_archive_meta['files_preview'] = array_values( array_filter( $current_archive_meta['files_preview'] ) );
+                        }
+
+                        if ( ! isset( $current_archive_meta['size'] ) ) {
+                            $current_archive_meta['size'] = ( $full_path && file_exists( $full_path ) ) ? filesize( $full_path ) : 0;
+                        }
+
+                        if ( ! isset( $current_archive_meta['bytes_total'] ) ) {
+                            $current_archive_meta['bytes_total'] = 0;
+                        }
+
+                        if ( ! isset( $current_archive_meta['file_count'] ) ) {
+                            $current_archive_meta['file_count'] = 0;
+                        }
+
+                        $archives[] = $current_archive_meta;
                     } elseif ( ! empty( $current_zip->filename ) && file_exists( $current_zip->filename ) ) {
                         // Remove empty archive.
                         unlink( $current_zip->filename );
                     }
                 }
 
-                $current_zip   = null;
-                $files_in_zip  = 0;
-                $current_size  = 0;
+                $current_zip          = null;
+                $files_in_zip         = 0;
+                $current_size         = 0;
+                $current_archive_meta = array();
                 $archive_index++;
             };
 
-            $open_archive = function() use ( &$current_zip, &$archive_index, &$base_filename, $export_dir, &$files_in_zip ) {
+            $open_archive = function() use ( &$current_zip, &$archive_index, &$base_filename, $export_dir, &$files_in_zip, &$current_archive_meta ) {
                 $filename   = sprintf( '%s-part-%02d.zip', $base_filename, $archive_index + 1 );
                 $full_path  = trailingslashit( $export_dir ) . $filename;
                 $zip        = new ZipArchive();
@@ -521,6 +1015,17 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
                 $current_zip  = $zip;
                 $files_in_zip = 0;
+                $current_archive_meta = array(
+                    'file'             => $filename,
+                    'path'             => $full_path,
+                    'size'             => 0,
+                    'created_at'       => current_time( 'timestamp' ),
+                    'file_count'       => 0,
+                    'files_preview'    => array(),
+                    'folders'          => array(),
+                    'bytes_total'      => 0,
+                    'max_size_reached' => false,
+                );
 
                 return $zip;
             };
@@ -553,6 +1058,9 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 }
 
                 if ( $max_size_bytes > 0 && ( $current_size + $file_size ) > $max_size_bytes && $files_in_zip > 0 ) {
+                    if ( ! empty( $current_archive_meta ) ) {
+                        $current_archive_meta['max_size_reached'] = true;
+                    }
                     $close_archive();
                     $opened = $open_archive();
                     if ( is_wp_error( $opened ) ) {
@@ -572,6 +1080,21 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 if ( ! $add_result ) {
                     $files_skipped[] = sprintf( esc_html__( 'Impossible d’ajouter %s à l’archive.', 'real-media-export' ), basename( $file_path ) );
                     continue;
+                }
+
+                if ( ! empty( $current_archive_meta ) ) {
+                    $current_archive_meta['file_count'] = isset( $current_archive_meta['file_count'] ) ? (int) $current_archive_meta['file_count'] + 1 : 1;
+                    $current_archive_meta['bytes_total'] = isset( $current_archive_meta['bytes_total'] ) ? (int) $current_archive_meta['bytes_total'] + (int) $file_size : (int) $file_size;
+                    if ( count( $current_archive_meta['files_preview'] ) < 3 ) {
+                        $current_archive_meta['files_preview'][] = basename( $file_path );
+                    }
+                    if ( false !== strpos( $zip_path, '/' ) ) {
+                        $segments   = explode( '/', $zip_path );
+                        $top_folder = reset( $segments );
+                        if ( '' !== $top_folder ) {
+                            $current_archive_meta['folders'][] = $top_folder;
+                        }
+                    }
                 }
 
                 $current_size += $file_size;
@@ -835,47 +1358,6 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             );
             wp_safe_redirect( $url );
             exit;
-        }
-
-        /**
-         * Render the table with generated archives.
-         *
-         * @param array $archives Archives list.
-         * @param array $result   Result data.
-         */
-        protected function render_results_table( $archives, $result ) {
-            if ( empty( $archives ) ) {
-                return;
-            }
-
-            echo '<h2>' . esc_html__( 'Archives générées', 'real-media-export' ) . '</h2>';
-            echo '<table class="widefat striped">';
-            echo '<thead><tr>';
-            echo '<th>' . esc_html__( 'Fichier', 'real-media-export' ) . '</th>';
-            echo '<th>' . esc_html__( 'Taille', 'real-media-export' ) . '</th>';
-            echo '<th>' . esc_html__( 'Téléchargement', 'real-media-export' ) . '</th>';
-            echo '</tr></thead>';
-            echo '<tbody>';
-
-            foreach ( $archives as $archive ) {
-                $file_name = isset( $archive['file'] ) ? $archive['file'] : '';
-                $size      = isset( $archive['size'] ) ? (int) $archive['size'] : 0;
-                $download_url = $this->get_download_url( $file_name );
-                echo '<tr>';
-                echo '<td>' . esc_html( $file_name ) . '</td>';
-                echo '<td>' . esc_html( size_format( $size ) ) . '</td>';
-                echo '<td>';
-                if ( $download_url ) {
-                    echo '<a class="button button-secondary" href="' . esc_url( $download_url ) . '">' . esc_html__( 'Télécharger', 'real-media-export' ) . '</a>';
-                } else {
-                    echo '<em>' . esc_html__( 'Fichier introuvable', 'real-media-export' ) . '</em>';
-                }
-                echo '</td>';
-                echo '</tr>';
-            }
-
-            echo '</tbody>';
-            echo '</table>';
         }
 
         /**
