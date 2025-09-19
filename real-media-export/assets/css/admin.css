@@ -1,0 +1,272 @@
+.real-media-export-panels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    align-items: flex-start;
+    margin-top: 24px;
+}
+
+.real-media-export-panel {
+    background: #fff;
+    border: 1px solid #dcdcde;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(31, 41, 55, 0.05);
+    padding: 24px;
+    flex: 1 1 360px;
+}
+
+.real-media-export-panel--form {
+    max-width: 420px;
+}
+
+.real-media-export-form .form-table th {
+    width: 200px;
+}
+
+.real-media-export-form .form-table td .description {
+    margin-top: 4px;
+}
+
+.real-media-export-panel--activity {
+    flex: 1 1 520px;
+}
+
+.real-media-export-activity {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.real-media-export-log {
+    background: #f6f7f7;
+    border: 1px solid #dcdcde;
+    border-radius: 8px;
+    padding: 16px;
+    min-height: 140px;
+    max-height: 260px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.real-media-export-log__placeholder {
+    margin: 0;
+    color: #6c7781;
+}
+
+.real-media-export-log__list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.real-media-export-log__item {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    margin-bottom: 12px;
+    opacity: 0;
+    transform: translateY(8px);
+    animation: rmeFadeInUp 0.35s ease forwards;
+}
+
+.real-media-export-log__item:last-child {
+    margin-bottom: 0;
+}
+
+.real-media-export-log__time {
+    font-family: "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 12px;
+    color: #50575e;
+    min-width: 68px;
+}
+
+.real-media-export-log__message {
+    flex: 1;
+    color: #1d2327;
+}
+
+.real-media-export-log__item.is-error .real-media-export-log__message {
+    color: #b32d2e;
+}
+
+.real-media-export-log__item.is-warning .real-media-export-log__message {
+    color: #d98500;
+}
+
+.real-media-export-message .notice {
+    margin: 0;
+}
+
+.real-media-export-results {
+    border: 1px solid #dcdcde;
+    border-radius: 10px;
+    padding: 20px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8f9fa 100%);
+}
+
+.real-media-export-results__header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    align-items: center;
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #50575e;
+}
+
+.real-media-export-results__summary {
+    font-weight: 500;
+}
+
+.real-media-export-results__placeholder {
+    margin: 0;
+    color: #6c7781;
+    font-style: italic;
+}
+
+.real-media-export-results__grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.real-media-export-card {
+    position: relative;
+    padding: 22px;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 24, 39, 0.08);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95) 0%, #ffffff 30%, #f3f4f6 100%);
+    box-shadow: 0 18px 35px -20px rgba(15, 23, 42, 0.35);
+    opacity: 0;
+    transform: translateY(16px);
+    animation: rmeCardEnter 0.45s ease forwards;
+    animation-delay: calc(var(--real-media-export-card-index, 0) * 0.1s);
+}
+
+.real-media-export-card__header {
+    margin-bottom: 16px;
+}
+
+.real-media-export-card__title {
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.real-media-export-card__subtitle {
+    margin: 0;
+    font-size: 13px;
+    color: #64748b;
+}
+
+.real-media-export-card__meta {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: grid;
+    gap: 8px;
+}
+
+.real-media-export-card__meta-label {
+    display: block;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6c7781;
+}
+
+.real-media-export-card__meta-value {
+    font-weight: 600;
+    color: #1d2327;
+}
+
+.real-media-export-card__detail {
+    margin: 0 0 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.real-media-export-card__detail-label {
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #6c7781;
+}
+
+.real-media-export-card__detail-value {
+    font-size: 13px;
+    color: #1d2327;
+    word-break: break-word;
+}
+
+.real-media-export-card__note {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: #9d6700;
+}
+
+.real-media-export-card__actions {
+    margin-top: 16px;
+}
+
+.real-media-export-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #50575e;
+}
+
+.real-media-export-loading::before {
+    content: "";
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid #2271b1;
+    border-top-color: transparent;
+    animation: rmeSpin 0.8s linear infinite;
+}
+
+@keyframes rmeFadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes rmeCardEnter {
+    from {
+        opacity: 0;
+        transform: translateY(18px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes rmeSpin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (max-width: 960px) {
+    .real-media-export-panel {
+        flex: 1 1 100%;
+    }
+
+    .real-media-export-panel--form {
+        max-width: none;
+    }
+}
