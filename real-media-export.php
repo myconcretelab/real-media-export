@@ -9,6 +9,7 @@
 
 defined( 'ABSPATH' ) || exit;
 
+
 if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
     class Real_Media_Export_Plugin {
         const NONCE_ACTION = 'real_media_export_action';
@@ -1645,7 +1646,13 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
         }
     }
 }
-
+add_action('init', function() {
+    global $wp_taxonomies;
+    echo '<pre>';
+    print_r(array_keys($wp_taxonomies));
+    echo '</pre>';
+    exit;
+});
 // Bootstrap the plugin.
 function real_media_export_plugin() {
     static $instance = null;
