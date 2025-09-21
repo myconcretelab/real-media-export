@@ -144,15 +144,33 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 return null;
             }
 
-            $candidates = array();
+            $attachment_taxonomies = array();
             foreach ( $taxonomies as $taxonomy_name => $taxonomy_object ) {
                 if ( empty( $taxonomy_object->object_type ) || ! in_array( 'attachment', (array) $taxonomy_object->object_type, true ) ) {
                     continue;
                 }
 
-                $slug = strtolower( $taxonomy_name );
+                $attachment_taxonomies[ $taxonomy_name ] = $taxonomy_object;
+            }
+
+            if ( empty( $attachment_taxonomies ) ) {
+                return null;
+            }
+
+            $scores = array();
+            foreach ( $attachment_taxonomies as $taxonomy_name => $taxonomy_object ) {
+                $score = 0;
+                $slug  = strtolower( $taxonomy_name );
+
+                if ( false !== strpos( $slug, 'rml' ) ) {
+                    $score += 25;
+                }
+                if ( false !== strpos( $slug, 'real_media' ) || false !== strpos( $slug, 'realmedialibrary' ) ) {
+                    $score += 25;
+                }
+
                 $label_candidates = array();
-                if ( isset( $taxonomy_object->label ) ) {
+                if ( isset( $taxonomy_object->label ) && is_string( $taxonomy_object->label ) ) {
                     $label_candidates[] = strtolower( $taxonomy_object->label );
                 }
                 if ( isset( $taxonomy_object->labels ) ) {
@@ -163,33 +181,67 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                     }
                 }
 
-                $matches_rml = false !== strpos( $slug, 'rml' ) || false !== strpos( $slug, 'real_media' );
-                if ( ! $matches_rml ) {
-                    foreach ( $label_candidates as $label_candidate ) {
-                        if ( false !== strpos( $label_candidate, 'real media' ) ) {
-                            $matches_rml = true;
-                            break;
-                        }
+                foreach ( $label_candidates as $label_candidate ) {
+                    if ( false !== strpos( $label_candidate, 'real media' ) || false !== strpos( $label_candidate, 'rml' ) ) {
+                        $score += 15;
+                        break;
                     }
                 }
 
-                if ( $matches_rml ) {
-                    $candidates[] = $taxonomy_name;
+                if ( ! empty( $taxonomy_object->hierarchical ) ) {
+                    $score += 10;
+                }
+
+                // Look for RML-specific term meta to lift genuine matches to the top.
+                $rml_meta_terms = get_terms(
+                    array(
+                        'taxonomy'   => $taxonomy_name,
+                        'meta_key'   => 'rml_folder_type',
+                        'fields'     => 'ids',
+                        'hide_empty' => false,
+                        'number'     => 1,
+                    )
+                );
+                if ( ! is_wp_error( $rml_meta_terms ) && ! empty( $rml_meta_terms ) ) {
+                    $score += 40;
+                } else {
+                    $rml_meta_terms = get_terms(
+                        array(
+                            'taxonomy'   => $taxonomy_name,
+                            'meta_key'   => 'rml_type',
+                            'fields'     => 'ids',
+                            'hide_empty' => false,
+                            'number'     => 1,
+                        )
+                    );
+                    if ( ! is_wp_error( $rml_meta_terms ) && ! empty( $rml_meta_terms ) ) {
+                        $score += 30;
+                    }
+                }
+
+                if ( $score > 0 ) {
+                    $scores[ $taxonomy_name ] = $score;
                 }
             }
 
-            if ( empty( $candidates ) ) {
-                return null;
-            }
-
-            // Prefer hierarchical taxonomies so the folder tree stays intact.
-            foreach ( $candidates as $candidate ) {
-                if ( ! empty( $taxonomies[ $candidate ]->hierarchical ) ) {
-                    return $candidate;
+            if ( empty( $scores ) ) {
+                foreach ( $attachment_taxonomies as $taxonomy_name => $taxonomy_object ) {
+                    if ( ! empty( $taxonomy_object->hierarchical ) ) {
+                        return $taxonomy_name;
+                    }
                 }
+
+                $fallback_taxonomies = array_keys( $attachment_taxonomies );
+                if ( empty( $fallback_taxonomies ) ) {
+                    return null;
+                }
+
+                return reset( $fallback_taxonomies );
             }
 
-            return reset( $candidates );
+            arsort( $scores );
+
+            return key( $scores );
         }
 
         /**
