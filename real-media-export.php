@@ -16,6 +16,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
         const TRANSIENT_PREFIX = 'real_media_export_result_';
         const EXPORT_FOLDER = 'real-media-export';
         const RESULT_TTL = 600; // 10 minutes.
+        const OPTION_TAXONOMY_OVERRIDE = 'real_media_export_taxonomy_override';
 
         /**
          * Cached taxonomy name detected.
@@ -95,17 +96,27 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 return $this->folder_taxonomy;
             }
 
+            $detected = null;
+
+            // 1) Use manual override if present and valid.
+            $override = $this->get_taxonomy_override();
+            if ( $override && taxonomy_exists( $override ) ) {
+                $detected = $override;
+            }
+
+            // 2) Try known defaults.
             $default_taxonomies = array(
                 'real_media_library',
                 'rml_folder',
                 'real_media_category',
             );
 
-            $detected = null;
-            foreach ( $default_taxonomies as $taxonomy ) {
+            if ( null === $detected ) {
+                foreach ( $default_taxonomies as $taxonomy ) {
                 if ( taxonomy_exists( $taxonomy ) ) {
                     $detected = $taxonomy;
                     break;
+                }
                 }
             }
 
@@ -131,6 +142,20 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $this->folder_taxonomy = $detected;
 
             return $this->folder_taxonomy;
+        }
+
+        /**
+         * Get the saved taxonomy override if any.
+         *
+         * @return string|null
+         */
+        protected function get_taxonomy_override() {
+            $value = get_option( self::OPTION_TAXONOMY_OVERRIDE, '' );
+            if ( ! is_string( $value ) ) {
+                return null;
+            }
+            $value = sanitize_key( $value );
+            return $value !== '' ? $value : null;
         }
 
         /**
@@ -245,6 +270,25 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
         }
 
         /**
+         * Persist taxonomy override from request if present.
+         */
+        protected function maybe_persist_taxonomy_override_from_request() {
+            if ( ! isset( $_POST['taxonomy_override'] ) ) {
+                return;
+            }
+
+            $raw = wp_unslash( $_POST['taxonomy_override'] );
+            $slug = is_string( $raw ) ? sanitize_key( $raw ) : '';
+
+            if ( '' === $slug ) {
+                delete_option( self::OPTION_TAXONOMY_OVERRIDE );
+                return;
+            }
+
+            update_option( self::OPTION_TAXONOMY_OVERRIDE, $slug );
+        }
+
+        /**
          * Render the admin page form and results.
          */
         public function render_admin_page() {
@@ -253,6 +297,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             }
 
             $taxonomy = $this->get_folder_taxonomy();
+            $taxonomy_override = $this->get_taxonomy_override();
             $selected_folder = isset( $_GET['folder'] ) ? absint( $_GET['folder'] ) : (int) get_user_meta( get_current_user_id(), 'real_media_export_last_folder', true );
             $include_children = isset( $_GET['include_children'] ) ? (bool) absint( $_GET['include_children'] ) : true;
             $max_size_mb = isset( $_GET['max_size_mb'] ) ? floatval( $_GET['max_size_mb'] ) : '';
@@ -287,6 +332,19 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
             echo '<table class="form-table" role="presentation">';
             echo '<tbody>';
+
+            echo '<tr>';
+            echo '<th scope="row"><label for="real-media-export-taxonomy-override">' . esc_html__( 'Taxonomie RML (override)', 'real-media-export' ) . '</label></th>';
+            echo '<td>';
+            printf(
+                '<input type="text" id="real-media-export-taxonomy-override" name="taxonomy_override" value="%s" class="regular-text" placeholder="%s" />',
+                esc_attr( $taxonomy_override ? $taxonomy_override : '' ),
+                esc_attr__( 'ex. rml_folder', 'real-media-export' )
+            );
+            $detected_info = $taxonomy && taxonomy_exists( $taxonomy ) ? sprintf( /* translators: %s: taxonomy slug */ esc_html__( 'Taxonomie détectée: %s', 'real-media-export' ), $taxonomy ) : esc_html__( 'Aucune taxonomie détectée pour RML.', 'real-media-export' );
+            echo '<p class="description">' . esc_html__( 'Optionnel: si renseigné, ce slug remplace l’auto‑détection. Laissez vide pour revenir à l’auto‑détection.', 'real-media-export' ) . '<br /><em>' . esc_html( $detected_info ) . '</em></p>';
+            echo '</td>';
+            echo '</tr>';
 
             echo '<tr>';
             echo '<th scope="row"><label for="real-media-export-folder">' . esc_html__( 'Dossier à exporter', 'real-media-export' ) . '</label></th>';
@@ -650,6 +708,9 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
             check_admin_referer( self::NONCE_ACTION );
 
+            // Persist taxonomy override if provided.
+            $this->maybe_persist_taxonomy_override_from_request();
+
             $params = array(
                 'folder_id'          => isset( $_POST['folder_id'] ) ? absint( $_POST['folder_id'] ) : 0,
                 'include_children'   => ! empty( $_POST['include_children'] ),
@@ -681,6 +742,9 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             }
 
             check_ajax_referer( self::NONCE_ACTION );
+
+            // Persist taxonomy override if provided.
+            $this->maybe_persist_taxonomy_override_from_request();
 
             $params = array(
                 'folder_id'          => isset( $_POST['folder_id'] ) ? absint( $_POST['folder_id'] ) : 0,
