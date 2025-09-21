@@ -31,6 +31,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
          */
         public function __construct() {
             add_action( 'init', array( $this, 'load_textdomain' ) );
+            // Debug: log taxonomies on init (after most plugins register them).
+            add_action( 'init', array( $this, 'debug_log_taxonomies' ), 99 );
             add_action( 'admin_menu', array( $this, 'register_menu' ) );
             add_action( 'admin_init', array( $this, 'maybe_cleanup_old_archives' ) );
             add_action( 'admin_post_real_media_export', array( $this, 'handle_export_request' ) );
@@ -268,6 +270,36 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             arsort( $scores );
 
             return key( $scores );
+        }
+
+        /**
+         * Debug helper: log all registered taxonomies to PHP error log.
+         * Only active when WP_DEBUG is true (can be overridden via filter).
+         */
+        public function debug_log_taxonomies() {
+            $enabled = apply_filters( 'real_media_export/log_taxonomies', ( defined( 'WP_DEBUG' ) && WP_DEBUG ) );
+            if ( ! $enabled ) {
+                return;
+            }
+
+            $taxonomies = get_taxonomies( array(), 'objects' );
+            if ( empty( $taxonomies ) || ! is_array( $taxonomies ) ) {
+                error_log( '[Real Media Export] Aucune taxonomie trouvée.' );
+                return;
+            }
+
+            $total = count( $taxonomies );
+            error_log( sprintf( '[Real Media Export] Taxonomies enregistrées (%d):', $total ) );
+
+            foreach ( $taxonomies as $name => $obj ) {
+                $label        = isset( $obj->label ) ? $obj->label : '';
+                $hierarchical = ! empty( $obj->hierarchical ) ? 'hierarchical' : 'flat';
+                $public       = isset( $obj->public ) ? ( $obj->public ? 'public' : 'non-public' ) : 'public?';
+                $object_types = implode( ',', array_map( 'strval', (array) ( $obj->object_type ?? array() ) ) );
+                $object_types = $object_types !== '' ? $object_types : '-';
+
+                error_log( sprintf( '[Real Media Export] - %s | label="%s" | %s | %s | objects=[%s]', $name, $label, $hierarchical, $public, $object_types ) );
+            }
         }
 
         /**
@@ -1646,13 +1678,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
         }
     }
 }
-add_action('init', function() {
-    global $wp_taxonomies;
-    echo '<pre>';
-    print_r(array_keys($wp_taxonomies));
-    echo '</pre>';
-    exit;
-});
+
 // Bootstrap the plugin.
 function real_media_export_plugin() {
     static $instance = null;
