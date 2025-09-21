@@ -109,6 +109,18 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 }
             }
 
+            if ( null === $detected ) {
+                if ( defined( 'RML_TAXONOMY' ) && taxonomy_exists( RML_TAXONOMY ) ) {
+                    $detected = RML_TAXONOMY;
+                } elseif ( defined( 'RML_FOLDER_TAXONOMY' ) && taxonomy_exists( RML_FOLDER_TAXONOMY ) ) {
+                    $detected = RML_FOLDER_TAXONOMY;
+                }
+            }
+
+            if ( null === $detected ) {
+                $detected = $this->detect_rml_taxonomy_from_registered();
+            }
+
             /**
              * Filter the taxonomy used to query Real Media Library folders.
              *
@@ -119,6 +131,65 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $this->folder_taxonomy = $detected;
 
             return $this->folder_taxonomy;
+        }
+
+        /**
+         * Try to infer the Real Media Library taxonomy from the registered ones.
+         *
+         * @return string|null
+         */
+        protected function detect_rml_taxonomy_from_registered() {
+            $taxonomies = get_taxonomies( array(), 'objects' );
+            if ( empty( $taxonomies ) || ! is_array( $taxonomies ) ) {
+                return null;
+            }
+
+            $candidates = array();
+            foreach ( $taxonomies as $taxonomy_name => $taxonomy_object ) {
+                if ( empty( $taxonomy_object->object_type ) || ! in_array( 'attachment', (array) $taxonomy_object->object_type, true ) ) {
+                    continue;
+                }
+
+                $slug = strtolower( $taxonomy_name );
+                $label_candidates = array();
+                if ( isset( $taxonomy_object->label ) ) {
+                    $label_candidates[] = strtolower( $taxonomy_object->label );
+                }
+                if ( isset( $taxonomy_object->labels ) ) {
+                    foreach ( (array) $taxonomy_object->labels as $label_value ) {
+                        if ( is_string( $label_value ) ) {
+                            $label_candidates[] = strtolower( $label_value );
+                        }
+                    }
+                }
+
+                $matches_rml = false !== strpos( $slug, 'rml' ) || false !== strpos( $slug, 'real_media' );
+                if ( ! $matches_rml ) {
+                    foreach ( $label_candidates as $label_candidate ) {
+                        if ( false !== strpos( $label_candidate, 'real media' ) ) {
+                            $matches_rml = true;
+                            break;
+                        }
+                    }
+                }
+
+                if ( $matches_rml ) {
+                    $candidates[] = $taxonomy_name;
+                }
+            }
+
+            if ( empty( $candidates ) ) {
+                return null;
+            }
+
+            // Prefer hierarchical taxonomies so the folder tree stays intact.
+            foreach ( $candidates as $candidate ) {
+                if ( ! empty( $taxonomies[ $candidate ]->hierarchical ) ) {
+                    return $candidate;
+                }
+            }
+
+            return reset( $candidates );
         }
 
         /**
