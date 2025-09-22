@@ -83,7 +83,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
          * @return bool
          */
         protected function rml_has_tree() {
-            return $this->rml_tree_available() || $this->rml_table_exists();
+            return $this->rml_table_exists();
         }
 
         /**
@@ -385,13 +385,13 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 wp_die( esc_html__( 'Vous n’avez pas les permissions nécessaires pour accéder à cette page.', 'real-media-export' ) );
             }
 
-            $taxonomy = $this->get_folder_taxonomy();
+            $taxonomy = '';
             $selected_folder = isset( $_GET['folder'] ) ? absint( $_GET['folder'] ) : (int) get_user_meta( get_current_user_id(), 'real_media_export_last_folder', true );
             $include_children = isset( $_GET['include_children'] ) ? (bool) absint( $_GET['include_children'] ) : true;
             $max_size_mb = isset( $_GET['max_size_mb'] ) ? floatval( $_GET['max_size_mb'] ) : '';
             $archive_prefix = isset( $_GET['archive_prefix'] ) ? sanitize_text_field( wp_unslash( $_GET['archive_prefix'] ) ) : '';
             $preserve_structure = isset( $_GET['preserve_structure'] ) ? (bool) absint( $_GET['preserve_structure'] ) : true;
-            $has_folders_source = ( ! empty( $taxonomy ) && $this->taxonomy_is_available( $taxonomy ) ) || $this->rml_has_tree();
+            $has_folders_source = $this->rml_has_tree();
 
             $result = $this->maybe_get_result();
 
@@ -917,11 +917,9 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
          * @return string
          */
         protected function get_folder_options_html( $selected ) {
-            $taxonomy = $this->get_folder_taxonomy();
+            $taxonomy = '';
             $counts = array();
-            if ( ! empty( $taxonomy ) && $this->taxonomy_is_available( $taxonomy ) ) {
-                $counts = $this->db_get_folder_counts( $taxonomy );
-            } elseif ( $this->rml_posts_table_exists() ) {
+            if ( $this->rml_posts_table_exists() ) {
                 $counts = $this->rml_db_get_folder_counts_from_posts();
             }
 
@@ -935,68 +933,10 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             }
 
             // 2) If the taxonomy is registered, use WP's get_terms.
-            if ( ! empty( $taxonomy ) && taxonomy_exists( $taxonomy ) ) {
-                $terms = get_terms(
-                    array(
-                        'taxonomy'   => $taxonomy,
-                        'hide_empty' => false,
-                        'orderby'    => 'name',
-                    )
-                );
-
-                if ( is_wp_error( $terms ) || empty( $terms ) ) {
-                    return '';
-                }
-
-                $by_parent = array();
-                foreach ( $terms as $term ) {
-                    $parent = (int) $term->parent;
-                    if ( ! isset( $by_parent[ $parent ] ) ) {
-                        $by_parent[ $parent ] = array();
-                    }
-                    $by_parent[ $parent ][] = $term;
-                }
-
-                return $this->render_folder_options_recursive( $by_parent, 0, $selected, 0, $counts );
-            }
+            // No taxonomy branch anymore
 
             // 3) Fallback to DB if taxonomy is only present in the database.
-            if ( empty( $taxonomy ) || ! $this->db_taxonomy_exists( $taxonomy ) ) {
-                return '';
-            }
-            global $wpdb;
-            $t_table  = $wpdb->terms;
-            $tt_table = $wpdb->term_taxonomy;
-
-            $rows = $wpdb->get_results(
-                $wpdb->prepare(
-                    "SELECT t.term_id, t.name, tt.parent
-                     FROM {$tt_table} tt
-                     INNER JOIN {$t_table} t ON t.term_id = tt.term_id
-                     WHERE tt.taxonomy = %s",
-                    $taxonomy
-                )
-            );
-
-            if ( empty( $rows ) ) {
-                return '';
-            }
-
-            $by_parent = array();
-            foreach ( $rows as $row ) {
-                $obj = (object) array(
-                    'term_id' => (int) $row->term_id,
-                    'name'    => (string) $row->name,
-                    'parent'  => (int) $row->parent,
-                );
-                $parent = $obj->parent;
-                if ( ! isset( $by_parent[ $parent ] ) ) {
-                    $by_parent[ $parent ] = array();
-                }
-                $by_parent[ $parent ][] = $obj;
-            }
-
-            return $this->render_folder_options_recursive( $by_parent, 0, $selected, 0, $counts );
+            return '';
         }
 
         /**
@@ -1210,10 +1150,10 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 'archives' => array(),
             );
 
-            $taxonomy = $this->get_folder_taxonomy();
+            $taxonomy = '';
             $has_tree = $this->rml_has_tree();
-            $taxonomy_ok = ( ! empty( $taxonomy ) && $this->taxonomy_is_available( $taxonomy ) );
-            if ( ! $has_tree && ! $taxonomy_ok ) {
+            $taxonomy_ok = false;
+            if ( ! $has_tree ) {
                 $result['message'] = esc_html__( 'Impossible de détecter une source de dossiers (RML).', 'real-media-export' );
                 return $result;
             }
@@ -1226,22 +1166,14 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
             // Validate selected folder — prefer RML tree first because the UI select is built from it.
             $folder = null;
-            if ( $has_tree ) {
-                $tree = $this->rml_fetch_tree();
-                if ( isset( $tree['by_id'][ (int) $params['folder_id'] ] ) ) {
-                    $node   = $tree['by_id'][ (int) $params['folder_id'] ];
-                    $folder = (object) array(
-                        'term_id' => (int) $node['id'],
-                        'name'    => (string) $node['name'],
-                        'parent'  => (int) $node['parent'],
-                    );
-                }
-            }
-            // Fallback to taxonomy lookup if needed.
-            if ( ! $folder && $taxonomy_ok ) {
-                $folder = taxonomy_exists( $taxonomy )
-                    ? get_term( $params['folder_id'], $taxonomy )
-                    : $this->db_get_term( (int) $params['folder_id'], $taxonomy );
+            $tree = $this->rml_fetch_tree();
+            if ( isset( $tree['by_id'][ (int) $params['folder_id'] ] ) ) {
+                $node   = $tree['by_id'][ (int) $params['folder_id'] ];
+                $folder = (object) array(
+                    'term_id' => (int) $node['id'],
+                    'name'    => (string) $node['name'],
+                    'parent'  => (int) $node['parent'],
+                );
             }
             if ( ! $folder || ( is_object( $folder ) && isset( $folder->errors ) ) ) {
                 $result['message'] = esc_html__( 'Le dossier demandé est introuvable.', 'real-media-export' );
@@ -1252,17 +1184,13 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $term_ids = array( (int) $params['folder_id'] );
             if ( $params['include_children'] ) {
                 $descendants = array();
-                if ( $this->rml_has_tree() ) {
-                    $descendants = $this->rml_get_descendant_ids( (int) $params['folder_id'] );
-                } elseif ( $taxonomy_ok ) {
-                    $descendants = $this->db_get_descendant_term_ids( (int) $params['folder_id'], $taxonomy );
-                }
+                $descendants = $this->rml_get_descendant_ids( (int) $params['folder_id'] );
                 if ( ! empty( $descendants ) ) {
                     $term_ids = array_unique( array_merge( $term_ids, array_map( 'intval', $descendants ) ) );
                 }
             }
 
-            $attachments = $this->query_attachments( $term_ids, $taxonomy_ok ? $taxonomy : '', (bool) $params['include_children'] );
+            $attachments = $this->query_attachments( $term_ids, '', (bool) $params['include_children'] );
 
             if ( empty( $attachments ) ) {
                 $result['status']  = 'warning';
@@ -1619,8 +1547,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 );
             }
 
-            // Build a lightweight map of attachment_id => array of term objects (term_id only).
-            if ( $this->rml_attachment_available() && ! empty( $this->rml_terms_by_object ) ) {
+            // Build a lightweight map of attachment_id => array of term objects (term_id only) using RML posts mapping.
+            if ( ! empty( $this->rml_terms_by_object ) ) {
                 $terms_by_object = array();
                 foreach ( $this->rml_terms_by_object as $aid => $folder_ids ) {
                     foreach ( array_unique( array_map( 'intval', (array) $folder_ids ) ) as $fid ) {
@@ -1628,7 +1556,14 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                     }
                 }
             } else {
-                $terms_by_object = $this->db_get_attachment_terms_map( $attachment_ids, $options['taxonomy'] );
+                // Try to fetch mapping for selected folders directly from DB.
+                $map = $this->rml_db_get_attachments_map_for_folders( (array) $options['term_ids'] );
+                $terms_by_object = array();
+                foreach ( $map as $aid => $folder_ids ) {
+                    foreach ( array_unique( array_map( 'intval', (array) $folder_ids ) ) as $fid ) {
+                        $terms_by_object[ (int) $aid ][] = (object) array( 'term_id' => (int) $fid );
+                    }
+                }
             }
 
             $archives       = array();
@@ -1885,7 +1820,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 return array();
             }
 
-            // Prefer RML tree (API or DB table) to match UI naming/order.
+            // Use RML tree (DB table) to match UI naming/order.
             $tree = $this->rml_fetch_tree();
             if ( ! empty( $tree ) && ! empty( $tree['by_id'] ) ) {
                 $map = array();
@@ -1904,37 +1839,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 }
             }
 
-            // Fallback to DB.
-            global $wpdb;
-            $t_table  = $wpdb->terms;
-            $tt_table = $wpdb->term_taxonomy;
-
-            $placeholders = implode( ',', array_fill( 0, count( $term_ids ), '%d' ) );
-            $sql          = $wpdb->prepare(
-                "SELECT t.term_id, t.name, tt.parent
-                 FROM {$tt_table} tt
-                 INNER JOIN {$t_table} t ON t.term_id = tt.term_id
-                 WHERE tt.taxonomy = %s
-                   AND t.term_id IN ($placeholders)",
-                array_merge( array( $taxonomy ), $term_ids )
-            );
-
-            $rows = $wpdb->get_results( $sql );
-            if ( empty( $rows ) ) {
-                return array();
-            }
-
-            $map = array();
-            foreach ( $rows as $row ) {
-                $obj           = (object) array(
-                    'term_id' => (int) $row->term_id,
-                    'name'    => (string) $row->name,
-                    'parent'  => (int) $row->parent,
-                );
-                $map[ $obj->term_id ] = $obj;
-            }
-
-            return $map;
+            // No taxonomy fallback anymore
+            return array();
         }
 
         /**
@@ -2363,73 +2269,11 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
          * @return array{by_id: array<int,array>, by_parent: array<int,array>, root_parent:int}
          */
         protected function rml_fetch_tree() {
-            $result = array( 'by_id' => array(), 'by_parent' => array(), 'root_parent' => 0 );
-            if ( ! $this->rml_tree_available() ) {
-                // Fallback to DB table.
-                if ( $this->rml_table_exists() ) {
-                    return $this->rml_fetch_tree_from_table();
-                }
-                $this->log_activity( __( 'API RML Tree indisponible — aucune source de dossier alternative.', 'real-media-export' ), 'warning' );
-                return $result;
-            }
-
-            try {
-                $this->log_activity( __( 'RML: récupération de l’arborescence des dossiers…', 'real-media-export' ) );
-                $cls = 'MatthiasWeb\\RealMediaLibrary\\api\\Tree';
-                $instance = null;
-                if ( method_exists( $cls, 'getInstance' ) ) {
-                    $instance = $cls::getInstance();
-                    $this->log_activity( __( 'RML Tree: initialisation via getInstance()', 'real-media-export' ) );
-                } elseif ( method_exists( $cls, 'instance' ) ) {
-                    $instance = $cls::instance();
-                    $this->log_activity( __( 'RML Tree: initialisation via instance()', 'real-media-export' ) );
-                } else {
-                    // Try to instantiate without args if possible.
-                    $instance = @new $cls();
-                    $this->log_activity( __( 'RML Tree: initialisation par constructeur direct', 'real-media-export' ) );
-                }
-
-                if ( ! $instance ) {
-                    $this->log_activity( __( 'RML Tree: échec d’initialisation.', 'real-media-export' ), 'warning' );
-                    return $result;
-                }
-
-                $candidates = array( 'getHierarchy', 'get_hierarchy', 'getTree', 'get_tree', 'getAll', 'get' );
-                $nodes = null;
-                $used = '';
-                foreach ( $candidates as $m ) {
-                    if ( method_exists( $instance, $m ) ) {
-                        $nodes = $instance->$m();
-                        $used  = $m;
-                        break;
-                    }
-                }
-
-                if ( '' !== $used ) {
-                    /* translators: %s: method name */
-                    $this->log_activity( sprintf( __( 'RML Tree: méthode utilisée « %s »', 'real-media-export' ), $used ) );
-                }
-
-                if ( empty( $nodes ) ) {
-                    $this->log_activity( __( 'RML Tree: aucune donnée de hiérarchie retournée.', 'real-media-export' ), 'warning' );
-                    return $result;
-                }
-
-                // Normalize recursively.
-                $this->rml_normalize_and_collect_nodes( $nodes, 0, $result['by_id'], $result['by_parent'] );
-                $count = count( $result['by_id'] );
-                /* translators: %d: number of folders */
-                $this->log_activity( sprintf( __( 'RML Tree: %d dossier(s) collecté(s).', 'real-media-export' ), $count ) );
-            } catch ( \Throwable $e ) {
-                $this->log_activity( sprintf( __( 'RML Tree: erreur « %s »', 'real-media-export' ), wp_strip_all_tags( $e->getMessage() ) ), 'warning' );
-            }
-
-            // If API did not produce a tree, try DB table.
-            if ( empty( $result['by_id'] ) && $this->rml_table_exists() ) {
+            if ( $this->rml_table_exists() ) {
                 return $this->rml_fetch_tree_from_table();
             }
-
-            return $result;
+            $this->log_activity( __( 'RML: table d’arborescence absente.', 'real-media-export' ), 'warning' );
+            return array( 'by_id' => array(), 'by_parent' => array(), 'root_parent' => 0 );
         }
 
         /**
