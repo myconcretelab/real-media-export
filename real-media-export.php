@@ -528,6 +528,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                     'filesSkippedSummary'  => esc_html__( '%s fichier(s) ignoré(s)', 'real-media-export' ),
                     'primaryFoldersLabel'  => esc_html__( 'Dossiers principaux', 'real-media-export' ),
                     'previewFilesLabel'    => esc_html__( 'Exemples de fichiers', 'real-media-export' ),
+                    'foldersTreeLabel'     => esc_html__( 'Structure des dossiers', 'real-media-export' ),
                     'maxSizeReachedNote'   => esc_html__( 'Cet archive a été clôturée automatiquement car la taille maximale définie a été atteinte.', 'real-media-export' ),
                     'downloadUnavailable'  => esc_html__( 'Lien de téléchargement indisponible.', 'real-media-export' ),
                     'archiveTitleFallback' => esc_html__( 'Archive ZIP', 'real-media-export' ),
@@ -691,6 +692,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $files_preview  = isset( $archive['files_preview'] ) ? array_values( array_filter( (array) $archive['files_preview'] ) ) : array();
             $max_size_reach = ! empty( $archive['max_size_reached'] );
             $delete_nonce   = wp_create_nonce( self::NONCE_ACTION );
+            $folder_tree    = isset( $archive['folder_tree'] ) ? (array) $archive['folder_tree'] : array();
 
             echo '<article class="real-media-export-card" style="--real-media-export-card-index:' . esc_attr( $index ) . '">';
             echo '<header class="real-media-export-card__header">';
@@ -720,6 +722,13 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 echo '<p class="real-media-export-card__detail"><span class="real-media-export-card__detail-label">' . esc_html__( 'Exemples de fichiers', 'real-media-export' ) . '</span><span class="real-media-export-card__detail-value">' . esc_html( implode( ', ', $files_preview ) ) . '</span></p>';
             }
 
+            if ( ! empty( $folder_tree ) ) {
+                echo '<div class="real-media-export-card__detail">';
+                echo '<span class="real-media-export-card__detail-label">' . esc_html__( 'Structure des dossiers', 'real-media-export' ) . '</span>';
+                echo $this->render_folder_tree_html( $folder_tree );
+                echo '</div>';
+            }
+
             if ( $max_size_reach ) {
                 echo '<p class="real-media-export-card__note">' . esc_html__( 'Cet archive a été clôturée automatiquement car la taille maximale définie a été atteinte.', 'real-media-export' ) . '</p>';
             }
@@ -734,6 +743,93 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             echo '</div>';
 
             echo '</article>';
+        }
+
+        /**
+         * Build a nested folder tree from path=>count maps.
+         *
+         * @param array $counts path => int
+         * @param array $names  path => name (last segment)
+         * @return array Nested nodes [ [ 'name'=>..., 'path'=>..., 'count'=>int, 'children'=>[] ], ... ]
+         */
+        protected function build_folder_tree_from_counts( $counts, $names ) {
+            if ( empty( $counts ) ) {
+                return array();
+            }
+            $nodes = array();
+            foreach ( $counts as $path => $cnt ) {
+                $path = (string) $path;
+                $nodes[ $path ] = array(
+                    'path'     => $path,
+                    'name'     => isset( $names[ $path ] ) ? (string) $names[ $path ] : basename( $path ),
+                    'count'    => (int) $cnt,
+                    'children' => array(),
+                );
+            }
+            $roots = array();
+            // Sort paths to ensure parents before children
+            uksort( $nodes, static function( $a, $b ) {
+                $da = substr_count( $a, '/' );
+                $db = substr_count( $b, '/' );
+                if ( $da === $db ) { return strcasecmp( $a, $b ); }
+                return $da <=> $db;
+            } );
+
+            foreach ( $nodes as $path => &$node ) {
+                $parent = strpos( $path, '/' ) !== false ? substr( $path, 0, strrpos( $path, '/' ) ) : '';
+                if ( $parent !== '' && isset( $nodes[ $parent ] ) ) {
+                    $nodes[ $parent ]['children'][] = &$node;
+                } else {
+                    $roots[] = &$node;
+                }
+            }
+            // Detach references
+            $final = $roots;
+            return $final;
+        }
+
+        /**
+         * Sanitize folder tree for client payload.
+         *
+         * @param array $nodes
+         * @return array
+         */
+        protected function sanitize_folder_tree_for_client( $nodes ) {
+            $out = array();
+            foreach ( (array) $nodes as $n ) {
+                $children = isset( $n['children'] ) ? $this->sanitize_folder_tree_for_client( $n['children'] ) : array();
+                $out[] = array(
+                    'name'     => isset( $n['name'] ) ? wp_strip_all_tags( (string) $n['name'] ) : '',
+                    'path'     => isset( $n['path'] ) ? wp_strip_all_tags( (string) $n['path'] ) : '',
+                    'count'    => isset( $n['count'] ) ? (int) $n['count'] : 0,
+                    'children' => $children,
+                );
+            }
+            return $out;
+        }
+
+        /**
+         * Render folder tree HTML (nested list).
+         *
+         * @param array $nodes
+         * @return string HTML
+         */
+        protected function render_folder_tree_html( $nodes ) {
+            if ( empty( $nodes ) || ! is_array( $nodes ) ) {
+                return '';
+            }
+            $html = '<ul class="real-media-export-card__tree">';
+            foreach ( $nodes as $n ) {
+                $name  = isset( $n['name'] ) ? (string) $n['name'] : '';
+                $count = isset( $n['count'] ) ? (int) $n['count'] : 0;
+                $html .= '<li>' . esc_html( sprintf( '%s (%s)', $name, number_format_i18n( $count ) ) );
+                if ( ! empty( $n['children'] ) && is_array( $n['children'] ) ) {
+                    $html .= $this->render_folder_tree_html( $n['children'] );
+                }
+                $html .= '</li>';
+            }
+            $html .= '</ul>';
+            return $html;
         }
 
         /**
@@ -822,13 +918,17 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
          */
         protected function get_folder_options_html( $selected ) {
             $taxonomy = $this->get_folder_taxonomy();
+            $counts = array();
+            if ( ! empty( $taxonomy ) && $this->taxonomy_is_available( $taxonomy ) ) {
+                $counts = $this->db_get_folder_counts( $taxonomy );
+            }
 
             // 1) Prefer RML tree (API or DB table) for perfect parity with UI.
             if ( $this->rml_has_tree() ) {
                 $tree = $this->rml_fetch_tree();
                 if ( ! empty( $tree['by_parent'] ) ) {
                     $root_parent = isset( $tree['root_parent'] ) ? (int) $tree['root_parent'] : 0;
-                    return $this->render_folder_options_recursive( $tree['by_parent'], $root_parent, $selected );
+                    return $this->render_folder_options_recursive( $tree['by_parent'], $root_parent, $selected, 0, $counts );
                 }
             }
 
@@ -855,7 +955,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                     $by_parent[ $parent ][] = $term;
                 }
 
-                return $this->render_folder_options_recursive( $by_parent, 0, $selected );
+                return $this->render_folder_options_recursive( $by_parent, 0, $selected, 0, $counts );
             }
 
             // 3) Fallback to DB if taxonomy is only present in the database.
@@ -894,7 +994,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 $by_parent[ $parent ][] = $obj;
             }
 
-            return $this->render_folder_options_recursive( $by_parent, 0, $selected );
+            return $this->render_folder_options_recursive( $by_parent, 0, $selected, 0, $counts );
         }
 
         /**
@@ -907,7 +1007,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
          *
          * @return string
          */
-        protected function render_folder_options_recursive( $by_parent, $parent, $selected, $depth = 0 ) {
+        protected function render_folder_options_recursive( $by_parent, $parent, $selected, $depth = 0, $counts = array() ) {
             if ( empty( $by_parent[ $parent ] ) ) {
                 return '';
             }
@@ -922,17 +1022,60 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $html = '';
             foreach ( $by_parent[ $parent ] as $term ) {
                 $indent = str_repeat( '&#8212; ', $depth );
+                $name  = $term->name;
+                $count = isset( $counts[ (int) $term->term_id ] ) ? (int) $counts[ (int) $term->term_id ] : null;
+                if ( null !== $count ) {
+                    $name .= ' (' . number_format_i18n( $count ) . ')';
+                }
                 $html  .= sprintf(
                     '<option value="%1$d" %2$s>%3$s%4$s</option>',
                     (int) $term->term_id,
                     selected( $selected, (int) $term->term_id, false ),
                     $indent,
-                    esc_html( $term->name )
+                    esc_html( $name )
                 );
-                $html .= $this->render_folder_options_recursive( $by_parent, (int) $term->term_id, $selected, $depth + 1 );
+                $html .= $this->render_folder_options_recursive( $by_parent, (int) $term->term_id, $selected, $depth + 1, $counts );
             }
 
             return $html;
+        }
+
+        /**
+         * Return number of attachments per term for a taxonomy.
+         *
+         * @param string $taxonomy Taxonomy name.
+         * @return array<int,int> Map term_id => count
+         */
+        protected function db_get_folder_counts( $taxonomy ) {
+            if ( empty( $taxonomy ) ) {
+                return array();
+            }
+
+            global $wpdb;
+            $posts = $wpdb->posts;
+            $tr    = $wpdb->term_relationships;
+            $tt    = $wpdb->term_taxonomy;
+
+            $sql = $wpdb->prepare(
+                "SELECT tt.term_id AS term_id, COUNT(DISTINCT p.ID) AS cnt
+                 FROM {$tt} tt
+                 INNER JOIN {$tr} tr ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                 INNER JOIN {$posts} p ON p.ID = tr.object_id
+                 WHERE tt.taxonomy = %s
+                   AND p.post_type = 'attachment'
+                   AND p.post_status IN ('inherit','publish','private')
+                 GROUP BY tt.term_id",
+                $taxonomy
+            );
+            $rows = $wpdb->get_results( $sql );
+            if ( empty( $rows ) ) {
+                return array();
+            }
+            $out = array();
+            foreach ( $rows as $r ) {
+                $out[ (int) $r->term_id ] = (int) $r->cnt;
+            }
+            return $out;
         }
 
         /**
@@ -1174,6 +1317,11 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
 
                 $download_url = $this->get_download_url( $file_name );
 
+                $folder_tree = array();
+                if ( isset( $archive['folder_tree'] ) && is_array( $archive['folder_tree'] ) ) {
+                    $folder_tree = $this->sanitize_folder_tree_for_client( $archive['folder_tree'] );
+                }
+
                 $prepared[] = array(
                     'file'                 => $file_name,
                     'size'                 => $size,
@@ -1187,6 +1335,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                     'folders'              => $folders,
                     'max_size_reached'     => ! empty( $archive['max_size_reached'] ),
                     'download_url'         => $download_url ? esc_url_raw( $download_url ) : '',
+                    'folder_tree'          => $folder_tree,
                 );
             }
 
@@ -1228,6 +1377,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                     'folders'              => isset( $archive['folders'] ) ? array_values( (array) $archive['folders'] ) : array(),
                     'max_size_reached'     => ! empty( $archive['max_size_reached'] ),
                     'download_url'         => isset( $archive['download_url'] ) ? $archive['download_url'] : $this->get_download_url( isset( $archive['file'] ) ? $archive['file'] : '' ),
+                    'folder_tree'          => isset( $archive['folder_tree'] ) ? $archive['folder_tree'] : array(),
                 );
             }
 
@@ -1391,6 +1541,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $files_total    = 0;
             $files_skipped  = array();
             $current_archive_meta = array();
+            $current_folder_counts = array();
+            $current_folder_names  = array();
             $timestamp      = gmdate( 'Ymd-His' );
             $prefix         = $options['archive_prefix'] ? sanitize_title( $options['archive_prefix'] ) : sanitize_title( get_bloginfo( 'name' ) );
             if ( empty( $prefix ) ) {
@@ -1406,7 +1558,7 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             }
             $base_filename = $prefix . '-' . $root_folder_slug . '-' . $timestamp;
 
-            $close_archive = function() use ( &$current_zip, &$archives, &$archive_index, &$files_in_zip, &$current_size, $export_dir, &$current_archive_meta ) {
+            $close_archive = function() use ( &$current_zip, &$archives, &$archive_index, &$files_in_zip, &$current_size, $export_dir, &$current_archive_meta, &$current_folder_counts, &$current_folder_names ) {
                 if ( $current_zip instanceof ZipArchive ) {
                     $current_zip->close();
 
@@ -1451,6 +1603,11 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                             $current_archive_meta['file_count'] = 0;
                         }
 
+                        // Build folder tree with counts for this archive
+                        if ( empty( $current_archive_meta['folder_tree'] ) ) {
+                            $current_archive_meta['folder_tree'] = $this->build_folder_tree_from_counts( $current_folder_counts, $current_folder_names );
+                        }
+
                         $archives[] = $current_archive_meta;
                     } elseif ( ! empty( $current_zip->filename ) && file_exists( $current_zip->filename ) ) {
                         // Remove empty archive.
@@ -1462,6 +1619,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 $files_in_zip         = 0;
                 $current_size         = 0;
                 $current_archive_meta = array();
+                $current_folder_counts = array();
+                $current_folder_names  = array();
                 $archive_index++;
             };
 
@@ -1554,6 +1713,23 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                         $top_folder = reset( $segments );
                         if ( '' !== $top_folder ) {
                             $current_archive_meta['folders'][] = $top_folder;
+                        }
+                        // Accumulate folder counts for full hierarchy
+                        $dir = dirname( $zip_path );
+                        if ( $dir && $dir !== '.' && $dir !== '/' ) {
+                            $parts = explode( '/', $dir );
+                            $path  = '';
+                            foreach ( $parts as $seg ) {
+                                if ( $seg === '' ) { continue; }
+                                $path = $path === '' ? $seg : ( $path . '/' . $seg );
+                                if ( ! isset( $current_folder_counts[ $path ] ) ) {
+                                    $current_folder_counts[ $path ] = 0;
+                                }
+                                $current_folder_counts[ $path ]++;
+                                if ( ! isset( $current_folder_names[ $path ] ) ) {
+                                    $current_folder_names[ $path ] = $seg;
+                                }
+                            }
                         }
                     }
                 }

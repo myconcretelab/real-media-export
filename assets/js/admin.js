@@ -195,6 +195,23 @@
         const grid = document.createElement('div');
         grid.className = 'real-media-export-results__grid';
 
+        const renderFolderTree = (nodes) => {
+            if (!Array.isArray(nodes) || !nodes.length) return null;
+            const ul = document.createElement('ul');
+            ul.className = 'real-media-export-card__tree';
+            nodes.forEach((n) => {
+                if (!n) return;
+                const li = document.createElement('li');
+                const name = typeof n.name === 'string' ? n.name : '';
+                const count = typeof n.count === 'number' ? n.count : 0;
+                li.textContent = name ? `${name} (${formatNumber(count)})` : String(formatNumber(count));
+                const child = renderFolderTree(n.children);
+                if (child) li.appendChild(child);
+                ul.appendChild(li);
+            });
+            return ul;
+        };
+
         archives.forEach((archive, index) => {
             const card = document.createElement('article');
             card.className = 'real-media-export-card';
@@ -258,6 +275,18 @@
                 paragraph.appendChild(detailValue);
                 card.appendChild(paragraph);
             });
+
+            if (Array.isArray(archive && archive.folder_tree) && archive.folder_tree.length) {
+                const block = document.createElement('div');
+                block.className = 'real-media-export-card__detail';
+                const label = document.createElement('span');
+                label.className = 'real-media-export-card__detail-label';
+                label.textContent = getString('foldersTreeLabel', 'Structure des dossiers');
+                block.appendChild(label);
+                const tree = renderFolderTree(archive.folder_tree);
+                if (tree) block.appendChild(tree);
+                card.appendChild(block);
+            }
 
             if (archive && archive.max_size_reached) {
                 const note = document.createElement('p');
