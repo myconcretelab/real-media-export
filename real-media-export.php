@@ -921,6 +921,8 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $counts = array();
             if ( ! empty( $taxonomy ) && $this->taxonomy_is_available( $taxonomy ) ) {
                 $counts = $this->db_get_folder_counts( $taxonomy );
+            } elseif ( $this->rml_posts_table_exists() ) {
+                $counts = $this->rml_db_get_folder_counts_from_posts();
             }
 
             // 1) Prefer RML tree (API or DB table) for perfect parity with UI.
@@ -1074,6 +1076,36 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
             $out = array();
             foreach ( $rows as $r ) {
                 $out[ (int) $r->term_id ] = (int) $r->cnt;
+            }
+            return $out;
+        }
+
+        /**
+         * Folder counts from RML posts mapping table.
+         *
+         * @return array<int,int> Map term_id/folder_id => count
+         */
+        protected function rml_db_get_folder_counts_from_posts() {
+            if ( ! $this->rml_posts_table_exists() ) {
+                return array();
+            }
+            global $wpdb;
+            $rp = $wpdb->prefix . 'realmedialibrary_posts';
+            $p  = $wpdb->posts;
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $rows = $wpdb->get_results(
+                "SELECT rp.fid AS fid, COUNT(DISTINCT p.ID) AS cnt
+                 FROM {$rp} rp
+                 INNER JOIN {$p} p ON p.ID = rp.attachment
+                 WHERE p.post_type = 'attachment' AND p.post_status IN ('inherit','publish','private')
+                 GROUP BY rp.fid"
+            );
+            if ( empty( $rows ) ) {
+                return array();
+            }
+            $out = array();
+            foreach ( $rows as $r ) {
+                $out[ (int) $r->fid ] = (int) $r->cnt;
             }
             return $out;
         }
@@ -1448,6 +1480,16 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 return array_map( 'intval', array_keys( $all ) );
             }
 
+            // Fallback to direct RML DB posts mapping if available.
+            if ( $this->rml_posts_table_exists() ) {
+                $map = $this->rml_db_get_attachments_map_for_folders( $term_ids );
+                $this->rml_terms_by_object = $map;
+                if ( empty( $map ) ) {
+                    return array();
+                }
+                return array_map( 'intval', array_keys( $map ) );
+            }
+
             global $wpdb;
             $posts_table = $wpdb->posts;
             $tr_table    = $wpdb->term_relationships;
@@ -1472,6 +1514,62 @@ if ( ! class_exists( 'Real_Media_Export_Plugin' ) ) {
                 return array();
             }
             return array_map( 'intval', $ids );
+        }
+
+        /**
+         * Does the RML posts mapping table exist?
+         *
+         * @return bool
+         */
+        protected function rml_posts_table_exists() {
+            global $wpdb;
+            $table = $wpdb->prefix . 'realmedialibrary_posts';
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+            return $exists === $table;
+        }
+
+        /**
+         * Get attachments for the given folder IDs using the RML posts mapping table.
+         * Returns map attachment_id => array of folder_ids.
+         *
+         * @param int[] $folder_ids
+         * @return array<int,int[]>
+         */
+        protected function rml_db_get_attachments_map_for_folders( $folder_ids ) {
+            $folder_ids = array_values( array_unique( array_filter( array_map( 'intval', (array) $folder_ids ) ) ) );
+            if ( empty( $folder_ids ) ) {
+                return array();
+            }
+            global $wpdb;
+            $table = $wpdb->prefix . 'realmedialibrary_posts';
+            $placeholders = implode( ',', array_fill( 0, count( $folder_ids ), '%d' ) );
+            $sql = $wpdb->prepare(
+                "SELECT attachment, fid FROM {$table} WHERE fid IN ($placeholders)",
+                $folder_ids
+            );
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $rows = $wpdb->get_results( $sql );
+            if ( empty( $rows ) ) {
+                return array();
+            }
+            $map = array();
+            foreach ( $rows as $row ) {
+                $aid = (int) ( isset( $row->attachment ) ? $row->attachment : 0 );
+                $fid = (int) ( isset( $row->fid ) ? $row->fid : 0 );
+                if ( $aid <= 0 || $fid <= 0 ) {
+                    continue;
+                }
+                if ( ! isset( $map[ $aid ] ) ) {
+                    $map[ $aid ] = array();
+                }
+                $map[ $aid ][] = $fid;
+            }
+            // Normalize unique ints
+            foreach ( $map as $aid => $arr ) {
+                $map[ $aid ] = array_values( array_unique( array_filter( array_map( 'intval', $arr ) ) ) );
+            }
+            return $map;
         }
 
         /**
