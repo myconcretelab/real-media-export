@@ -266,21 +266,27 @@
                 card.appendChild(note);
             }
 
+            const actions = document.createElement('div');
+            actions.className = 'real-media-export-card__actions';
             if (archive && archive.download_url) {
-                const actions = document.createElement('div');
-                actions.className = 'real-media-export-card__actions';
                 const button = document.createElement('a');
                 button.className = 'button button-primary';
                 button.href = archive.download_url;
                 button.textContent = getString('downloadLabel', 'Télécharger');
                 actions.appendChild(button);
-                card.appendChild(actions);
             } else {
                 const unavailable = document.createElement('p');
                 unavailable.className = 'real-media-export-card__note';
                 unavailable.textContent = getString('downloadUnavailable', 'Lien de téléchargement indisponible.');
                 card.appendChild(unavailable);
             }
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'button-link-delete real-media-export-card__delete';
+            del.dataset.file = archive && archive.file ? archive.file : '';
+            del.textContent = getString('deleteLabel', 'Supprimer');
+            actions.appendChild(del);
+            card.appendChild(actions);
 
             grid.appendChild(card);
         });
@@ -307,6 +313,14 @@
         }
         setMessage(payload);
         renderResults(payload);
+        if (Array.isArray(payload.activity) && payload.activity.length) {
+            payload.activity.forEach((entry) => {
+                if (!entry) return;
+                const msg = typeof entry.message === 'string' ? entry.message : '';
+                const type = entry.type === 'warning' || entry.type === 'error' ? entry.type : 'info';
+                if (msg) appendLog(msg, type);
+            });
+        }
         if (Array.isArray(payload.files_skipped) && payload.files_skipped.length) {
             payload.files_skipped.forEach((warning) => appendLog(warning, 'warning'));
         }
@@ -375,5 +389,55 @@
 
     if (settings.initialResult) {
         handleResultPayload(settings.initialResult);
+    }
+
+    // Deletion handling (event delegation on results container)
+    if (resultsContainer && settings.ajaxUrl && settings.deleteNonce) {
+        resultsContainer.addEventListener('click', (ev) => {
+            const btn = ev.target && ev.target.closest ? ev.target.closest('.real-media-export-card__delete') : null;
+            if (!btn) return;
+            ev.preventDefault();
+            const file = btn.dataset.file || '';
+            if (!file) return;
+            if (!confirm(getString('confirmDelete', 'Supprimer ce fichier ZIP du disque ?'))) {
+                return;
+            }
+            btn.disabled = true;
+            const formData = new FormData();
+            formData.set('action', 'real_media_export_delete');
+            formData.set('file', file);
+            formData.set('_wpnonce', settings.deleteNonce);
+
+            fetch(settings.ajaxUrl, {
+                method: 'POST',
+                credentials: 'same-origin',
+                body: formData,
+            })
+                .then((response) => response.json())
+                .then((data) => {
+                    if (!data || !data.success) {
+                        throw new Error('fail');
+                    }
+                    // Remove card
+                    const card = btn.closest('.real-media-export-card');
+                    if (card && card.parentNode) {
+                        card.parentNode.removeChild(card);
+                    }
+                    // If grid is empty, show placeholder
+                    const grid = resultsContainer.querySelector('.real-media-export-results__grid');
+                    if (grid && !grid.children.length) {
+                        resultsContainer.innerHTML = '';
+                        const placeholder = document.createElement('p');
+                        placeholder.className = 'real-media-export-results__placeholder';
+                        placeholder.textContent = getString('resultsPlaceholder', 'Les liens de téléchargement apparaîtront ici une fois les archives prêtes.');
+                        resultsContainer.appendChild(placeholder);
+                    }
+                    appendLog(getString('deleted', 'Archive supprimée.'), 'info');
+                })
+                .catch(() => {
+                    appendLog(getString('deleteError', 'Impossible de supprimer l’archive.'), 'error');
+                    btn.disabled = false;
+                });
+        });
     }
 })();
